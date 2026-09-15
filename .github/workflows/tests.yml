@@ -20,7 +20,7 @@ jobs:
       matrix:
         shell: [powershell, pwsh]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Run isolated integration tests (Windows PowerShell 5.1)
