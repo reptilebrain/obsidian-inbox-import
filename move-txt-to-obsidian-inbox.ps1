@@ -1,9 +1,7 @@
 # Move loose text files into an existing Obsidian vault without changing their bytes.
 [CmdletBinding()]
 param (
-    # Pass the existing vault root explicitly, for example -VaultPath 'D:\Notes\My Vault'.
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
+    # Override the default vault setting below for this invocation.
     [string]$VaultPath,
     [switch]$DryRun,
     # Zero disables both creation-time and last-write-time checks.
@@ -11,7 +9,39 @@ param (
     [int]$MinAgeMinutes = 60
 )
 
+# Set your existing Obsidian vault folder here.
+# Example: 'D:\Notes\My Vault'
+# An explicit -VaultPath argument overrides this setting.
+$DefaultVaultPath = ''
+
 $ErrorActionPreference = 'Stop'
+
+# Check whether the argument was supplied, so an explicit empty value never falls back.
+if (-not $PSBoundParameters.ContainsKey('VaultPath')) {
+    $VaultPath = $DefaultVaultPath
+}
+if ([string]::IsNullOrWhiteSpace($VaultPath)) {
+    Write-Warning 'Configuration error: set $DefaultVaultPath or pass a non-empty -VaultPath.' -WarningAction Continue
+    exit 1
+}
+
+# IsPathRooted also accepts drive-relative paths. Require a drive root or a UNC
+# server and share explicitly; this works in Windows PowerShell 5.1 as well.
+$isDrivePath = $VaultPath -match '^[A-Za-z]:[\\/]'
+$isUncPath = $VaultPath -match '^\\\\[^\\/:*?"<>|\s]+\\[^\\/:*?"<>|\s][^\\/:*?"<>|]*(?:\\|$)'
+if (-not ($isDrivePath -or $isUncPath)) {
+    Write-Warning 'Configuration error: VaultPath must be a fully qualified Windows path, such as D:\Notes\My Vault or \\server\share\My Vault.' -WarningAction Continue
+    exit 1
+}
+try {
+    # Validate path syntax without accessing the filesystem or creating a log.
+    $null = [IO.Path]::GetFullPath($VaultPath)
+}
+catch {
+    Write-Warning "Configuration error: invalid VaultPath: $($_.Exception.Message)" -WarningAction Continue
+    exit 1
+}
+
 $script:hadErrors = $false
 $script:logEnabled = $false
 $script:logPath = $null
