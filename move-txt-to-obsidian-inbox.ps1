@@ -1,9 +1,10 @@
 # Move loose text files into an existing Obsidian vault without changing their bytes.
 [CmdletBinding()]
 param (
-    # Configure the existing vault root here, or pass -VaultPath when invoking the script.
+    # Pass the existing vault root explicitly, for example -VaultPath 'D:\Notes\My Vault'.
+    [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$VaultPath = 'C:\Users\perra\OneDrive\Dokument\The Vault',
+    [string]$VaultPath,
     [switch]$DryRun,
     # Zero disables both creation-time and last-write-time checks.
     [ValidateRange(0, 2147483647)]
@@ -62,6 +63,10 @@ try {
         throw "Vault root is not a filesystem directory: $VaultPath"
     }
     $inbox = Join-Path $vault.FullName '00_Inbox'
+    if ((Test-Path -LiteralPath $inbox -ErrorAction Stop) -and
+        -not (Test-Path -LiteralPath $inbox -PathType Container -ErrorAction Stop)) {
+        throw "Inbox exists but is not a directory: $inbox"
+    }
     $cutoff = [DateTime]::UtcNow.AddMinutes(-[double]$MinAgeMinutes)
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     # Reserve planned targets as well, so dry runs handle duplicate source names.
@@ -71,7 +76,7 @@ try {
         [Environment]::GetFolderPath('MyDocuments')
     ) | Select-Object -Unique
 
-    foreach ($source in $sources) {
+    :ImportSources foreach ($source in $sources) {
         try {
             if ([string]::IsNullOrWhiteSpace($source)) { throw 'Windows returned an empty source path.' }
             # No recursion and no ReparsePoint exclusion: local OneDrive files are allowed.
@@ -84,6 +89,9 @@ try {
         }
         foreach ($file in $files) {
             try {
+                # Enumeration caches metadata; refresh before testing existence or age.
+                $file.Refresh()
+                if (-not $file.Exists) { throw 'Source file no longer exists.' }
                 if ($MinAgeMinutes -gt 0 -and
                     ($file.CreationTimeUtc -ge $cutoff -or $file.LastWriteTimeUtc -ge $cutoff)) {
                     $skipped++
@@ -104,11 +112,30 @@ try {
                     Write-Output "DRY RUN $($file.FullName) -> $target"
                     continue
                 }
+                # Abort all remaining imports if the validated vault has disappeared.
+                # This check narrows, but cannot eliminate, the race before creation.
+                try {
+                    $currentVault = Get-Item -LiteralPath $vault.FullName -Force -ErrorAction Stop
+                    if (-not $currentVault.PSIsContainer -or $currentVault.PSProvider.Name -ne 'FileSystem') {
+                        throw "Vault root is no longer a filesystem directory: $($vault.FullName)"
+                    }
+                }
+                catch {
+                    Report-RunError "Import aborted; vault root unavailable: $($_.Exception.Message)"
+                    break ImportSources
+                }
                 # Create the inbox only when an eligible file is about to be moved.
                 [void][IO.Directory]::CreateDirectory($inbox)
                 # File.Move never overwrites, even if a target appears after the check.
                 # A concurrent conflict is reported per file and leaves the source intact.
                 [IO.File]::Move($file.FullName, $target)
+                # A cross-volume move may leave the source behind. Report it without
+                # deleting the remaining source or claiming a successful import.
+                $destination = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+                if ($destination.PSIsContainer -or $destination.PSProvider.Name -ne 'FileSystem' -or
+                    (Test-Path -LiteralPath $file.FullName -ErrorAction Stop)) {
+                    throw "Move verification failed; destination must be a file and source must be absent: $target"
+                }
                 [void]$reserved.Add($target)
                 $moved++
                 Write-Output "MOVED $($file.FullName) -> $target"
