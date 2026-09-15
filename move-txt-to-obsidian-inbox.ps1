@@ -9,7 +9,9 @@ param (
     [int]$MinAgeMinutes = 60
 )
 
-# Set your existing Obsidian vault folder here.
+# Set your existing Obsidian vault folder in obsidian-inbox-import.local.ps1
+# beside this script: $DefaultVaultPath = 'D:\Notes\My Vault'
+# That optional local file is ignored by Git and overrides the setting below.
 # Example: 'D:\Notes\My Vault'
 # An explicit -VaultPath argument overrides this setting.
 $DefaultVaultPath = ''
@@ -18,10 +20,23 @@ $ErrorActionPreference = 'Stop'
 
 # Check whether the argument was supplied, so an explicit empty value never falls back.
 if (-not $PSBoundParameters.ContainsKey('VaultPath')) {
+    try {
+        $localConfigPath = Join-Path $PSScriptRoot 'obsidian-inbox-import.local.ps1'
+        if (Test-Path -LiteralPath $localConfigPath -ErrorAction Stop) {
+            if (-not (Test-Path -LiteralPath $localConfigPath -PathType Leaf -ErrorAction Stop)) {
+                throw 'The local configuration must be a PowerShell file.'
+            }
+            . $localConfigPath
+        }
+    }
+    catch {
+        Write-Warning "Configuration error: cannot load local configuration: $($_.Exception.Message)" -WarningAction Continue
+        exit 1
+    }
     $VaultPath = $DefaultVaultPath
 }
 if ([string]::IsNullOrWhiteSpace($VaultPath)) {
-    Write-Warning 'Configuration error: set $DefaultVaultPath or pass a non-empty -VaultPath.' -WarningAction Continue
+    Write-Warning 'Configuration error: set $DefaultVaultPath in obsidian-inbox-import.local.ps1 or pass a non-empty -VaultPath.' -WarningAction Continue
     exit 1
 }
 
