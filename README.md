@@ -1,6 +1,7 @@
 # Obsidian Inbox Import
 
 [![Tests](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/tests.yml)
+[![PSScriptAnalyzer](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/analysis.yml/badge.svg?branch=main)](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/analysis.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Move loose `.txt` files from your Windows Desktop and Documents folders into an existing Obsidian vault's `00_Inbox`, changing the extension to `.md` without rewriting the file contents.
@@ -206,6 +207,19 @@ Each command requires its corresponding PowerShell installation. No Pester insta
 The tests execute temporary copies with substituted source folders and a temporary `LOCALAPPDATA`. They do not copy your machine-local configuration. Test folders remain under the printed temporary test root for inspection and can be removed afterwards.
 
 Coverage includes configuration precedence, empty and relative paths, dry runs, age filtering, name conflicts, unchanged content hashes, inbox validation, empty runs and continued processing after file and logging failures. Selected failure paths use injected changes or test doubles, including a disappearing vault and an incomplete move. UNC checks verify path format without accessing a real network share.
+
+## Static analysis
+
+The separate PSScriptAnalyzer workflow checks tracked PowerShell files in both Windows PowerShell 5.1 and PowerShell 7. It uses PSScriptAnalyzer 1.25.0 and fails on errors or warnings. The ignored local configuration is excluded.
+
+To run it locally after installing the pinned analyzer:
+
+```powershell
+Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser
+.\tests\run-analysis.ps1
+```
+
+The internal `New-Case` test fixture has one documented, function-scoped exception to `PSUseShouldProcessForStateChangingFunctions`: it must create a complete set of isolated temporary test data. Other functions and rules remain checked. The analyzer is a development dependency; normal imports do not need it.
 
 ## Related project
 

@@ -1,0 +1,43 @@
+name: PSScriptAnalyzer
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: PSScriptAnalyzer (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download pinned analyzer
+        shell: pwsh
+        run: |
+          $moduleRoot = Join-Path $env:RUNNER_TEMP 'pssa'
+          [void][IO.Directory]::CreateDirectory($moduleRoot)
+          Save-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Repository PSGallery -Path $moduleRoot -Force -ErrorAction Stop
+      - name: Analyze with Windows PowerShell 5.1
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        run: |
+          $env:PSModulePath = "$env:RUNNER_TEMP\pssa;$env:PSModulePath"
+          ./tests/run-analysis.ps1
+      - name: Analyze with PowerShell 7
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        run: |
+          $env:PSModulePath = "$env:RUNNER_TEMP\pssa;$env:PSModulePath"
+          ./tests/run-analysis.ps1

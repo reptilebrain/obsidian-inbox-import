@@ -75,7 +75,7 @@ function Write-RunLog {
     }
 }
 
-function Report-RunError {
+function Write-RunError {
     param ([string]$Message)
     $script:hadErrors = $true
     Write-Warning $Message -WarningAction Continue
@@ -95,7 +95,7 @@ if (-not $DryRun) {
         $script:logEnabled = $true
         Write-RunLog "START Vault=$VaultPath MinAgeMinutes=$MinAgeMinutes"
     }
-    catch { Report-RunError "Log initialization failed: $($_.Exception.Message)" }
+    catch { Write-RunError "Log initialization failed: $($_.Exception.Message)" }
 }
 
 $moved = 0
@@ -129,7 +129,7 @@ try {
                 Where-Object { $_.Extension -ieq '.txt' } | Sort-Object Name)
         }
         catch {
-            Report-RunError "Cannot list source '$source': $($_.Exception.Message)"
+            Write-RunError "Cannot list source '$source': $($_.Exception.Message)"
             continue
         }
         foreach ($file in $files) {
@@ -166,7 +166,7 @@ try {
                     }
                 }
                 catch {
-                    Report-RunError "Import aborted; vault root unavailable: $($_.Exception.Message)"
+                    Write-RunError "Import aborted; vault root unavailable: $($_.Exception.Message)"
                     break ImportSources
                 }
                 # Create the inbox only when an eligible file is about to be moved.
@@ -186,11 +186,11 @@ try {
                 Write-Output "MOVED $($file.FullName) -> $target"
                 Write-RunLog "OK $($file.FullName) -> $target"
             }
-            catch { Report-RunError "Cannot move '$($file.FullName)': $($_.Exception.Message)" }
+            catch { Write-RunError "Cannot move '$($file.FullName)': $($_.Exception.Message)" }
         }
     }
 }
-catch { Report-RunError "Run failed: $($_.Exception.Message)" }
+catch { Write-RunError "Run failed: $($_.Exception.Message)" }
 
 $summary = "Moved=$moved Planned=$planned Skipped=$skipped"
 Write-Output $summary
