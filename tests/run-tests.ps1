@@ -7,7 +7,11 @@ $ErrorActionPreference = 'Stop'
 $original = [IO.File]::ReadAllText((Join-Path (Split-Path $PSScriptRoot -Parent) 'move-txt-to-obsidian-inbox.ps1'))
 $oldLocal = $env:LOCALAPPDATA
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
-function New-Case([string]$Name) {
+function New-Case {
+    # This internal fixture always creates disposable test data. WhatIf would leave
+    # the fixture incomplete; it is not a user-facing filesystem operation.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal fixture creates only isolated temporary test data; partial setup would invalidate tests.')]
+    param ([string]$Name)
     $script:case = Join-Path $Root ($engineName + '-' + $Name)
     $script:desktop = Join-Path $case 'Desktop'
     $script:documents = Join-Path $case 'Documents'
@@ -27,7 +31,7 @@ function Write-TestCopy {
     Assert (-not ($code -match 'GetFolderPath')) 'Unmocked Windows source lookup; refusing to execute'
     [IO.File]::WriteAllText($copy,$code)
 }
-function Run-Case([string[]]$Options = @()) {
+function Invoke-Case([string[]]$Options = @()) {
     $script:output = @(& $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $copy -VaultPath $vault @Options 2>&1)
     $script:status = $LASTEXITCODE
 }
@@ -37,7 +41,7 @@ function Get-TreeSnapshot {
         '{0}|{1}' -f $_.FullName, $hash
     }
 }
-function Put-File([string]$Path, [bool]$Old = $true) {
+function Write-TestFile([string]$Path, [bool]$Old = $true) {
     [IO.File]::WriteAllBytes($Path, [byte[]](0,255,254,13,10,195,165,0,65))
     if ($Old) {
         [IO.File]::SetCreationTimeUtc($Path,[DateTime]::UtcNow.AddHours(-3))
@@ -52,7 +56,7 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     $engineName = [IO.Path]::GetFileNameWithoutExtension($engine)
     foreach ($mode in @('local-default','local-override','local-empty','local-broken','local-dry')) {
         New-Case $mode
-        Put-File (Join-Path $desktop 'note.txt')
+        Write-TestFile (Join-Path $desktop 'note.txt')
         $localConfig = Join-Path $case 'obsidian-inbox-import.local.ps1'
         if ($mode -eq 'local-broken') {
             [IO.File]::WriteAllText($localConfig, 'throw ''Simulated configuration failure''')
@@ -79,7 +83,7 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     Write-Output "$engineName PASS local config loading, explicit override, empty/broken config, dry run"
 
     New-Case 'configured-default'
-    Put-File (Join-Path $desktop 'note.txt')
+    Write-TestFile (Join-Path $desktop 'note.txt')
     $code = $code.Replace('$DefaultVaultPath = ''''', ('$DefaultVaultPath = ''' + $vault + ''''))
     Write-TestCopy
     $output = @(& $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $copy 2>&1)
@@ -90,10 +94,10 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     New-Case 'explicit-override'
     $unused = Join-Path $case 'UnusedDefault'
     [void][IO.Directory]::CreateDirectory($unused)
-    Put-File (Join-Path $desktop 'note.txt')
+    Write-TestFile (Join-Path $desktop 'note.txt')
     $code = $code.Replace('$DefaultVaultPath = ''''', ('$DefaultVaultPath = ''' + $unused + ''''))
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 0 -and (Test-Path (Join-Path $vault '00_Inbox\note.md')) -and -not (Test-Path (Join-Path $unused '00_Inbox'))) "Explicit override: $output"
     Write-Output "$engineName PASS explicit VaultPath overrides configured default"
 
@@ -153,9 +157,9 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
 
     foreach ($dryMode in @($true,$false)) {
         New-Case "inbox-file-$dryMode"
-        Put-File (Join-Path $vault '00_Inbox')
-        Put-File (Join-Path $desktop 'note.txt')
-        if ($dryMode) { Run-Case @('-DryRun') } else { Run-Case }
+        Write-TestFile (Join-Path $vault '00_Inbox')
+        Write-TestFile (Join-Path $desktop 'note.txt')
+        if ($dryMode) { Invoke-Case @('-DryRun') } else { Invoke-Case }
         Assert ($status -eq 1 -and ($output -join "`n") -match 'Inbox exists but is not a directory') "Inbox type: $output"
         Assert (Test-Path (Join-Path $desktop 'note.txt')) 'Inbox type moved source'
         if ($dryMode) { Assert (-not (Test-Path $env:LOCALAPPDATA)) 'Dry inbox type wrote log' }
@@ -163,13 +167,13 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     Write-Output "$engineName PASS inbox file rejected in dry and real run"
 
     New-Case 'vault-disappears'
-    Put-File (Join-Path $desktop 'a.txt')
-    Put-File (Join-Path $desktop 'b.txt')
-    Put-File (Join-Path $documents 'c.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'b.txt')
+    Write-TestFile (Join-Path $documents 'c.txt')
     $hook = '[IO.Directory]::Move($vault.FullName, ($vault.FullName + ''-gone''))'
     $code = $code.Replace('        foreach ($file in $files) {', "        $hook`n        foreach (`$file in `$files) {")
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and -not (Test-Path $vault)) "Disappearing vault recreated: $output"
     Assert (($output -join "`n") -match 'Import aborted; vault root unavailable') 'Missing abort message'
     Assert (@($output | Where-Object { "$_" -match 'Import aborted;' }).Count -eq 1) 'Failed to abort remaining import'
@@ -178,12 +182,12 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
 
     foreach ($age in @(60,0)) {
         New-Case "stale-metadata-$age"
-        Put-File (Join-Path $desktop 'a.txt')
+        Write-TestFile (Join-Path $desktop 'a.txt')
         $hook = 'foreach ($cached in $files) { $null = $cached.LastWriteTimeUtc; [IO.File]::SetLastWriteTimeUtc($cached.FullName, [DateTime]::UtcNow) }'
         $code = $code.Replace('        foreach ($file in $files) {', "        $hook`n        foreach (`$file in `$files) {")
         Assert ($original.Contains("[Environment]::GetFolderPath('Desktop')")) 'Desktop test seam changed'
     Write-TestCopy
-        Run-Case @('-MinAgeMinutes',"$age")
+        Invoke-Case @('-MinAgeMinutes',"$age")
         Assert ($status -eq 0) "Stale metadata: $output"
         if ($age -eq 60) {
             Assert (($output -join "`n") -match 'Skipped=1' -and (Test-Path (Join-Path $desktop 'a.txt'))) 'Stale metadata was used'
@@ -192,21 +196,21 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     Write-Output "$engineName PASS modified after enumeration refreshes metadata; zero still disables age check (injected timestamp change)"
 
     New-Case 'source-disappears'
-    Put-File (Join-Path $desktop 'a.txt')
-    Put-File (Join-Path $desktop 'b.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'b.txt')
     $hook = 'if ($files.Count -gt 0) { [IO.File]::Move($files[0].FullName, ($files[0].FullName + ''.gone'')) }'
     $code = $code.Replace('        foreach ($file in $files) {', "        $hook`n        foreach (`$file in `$files) {")
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Source file no longer exists' -and ($output -join "`n") -match 'Moved=1') "Source refresh: $output"
     Write-Output "$engineName PASS source disappears after enumeration, later file proceeds (injected rename)"
 
     New-Case 'incomplete-move'
-    Put-File (Join-Path $desktop 'a.txt')
-    Put-File (Join-Path $desktop 'b.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'b.txt')
     $code = $code.Replace('[IO.File]::Move($file.FullName, $target)', '[IO.File]::Copy($file.FullName, $target)')
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Moved=0') "Incomplete move counted: $output"
     Assert (@(Get-ChildItem $desktop -Filter '*.txt').Count -eq 2) 'Remaining source deleted'
     Assert (@(Get-ChildItem (Join-Path $vault '00_Inbox') -Filter '*.md').Count -eq 2) 'Later move was not attempted'
@@ -216,26 +220,26 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     Write-Output "$engineName PASS incomplete move exit 1, no success/count, sources retained, continues (File.Copy double)"
 
     New-Case 'missing-destination'
-    Put-File (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
     $code = $code.Replace('[IO.File]::Move($file.FullName, $target)', '[IO.File]::Move($file.FullName, ($file.FullName + ''.elsewhere''))')
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Moved=0') "Missing destination: $output"
     Write-Output "$engineName PASS missing destination exit 1 (redirected move double)"
 
     New-Case 'directory-destination'
-    Put-File (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
     $code = $code.Replace('[IO.File]::Move($file.FullName, $target)', '[IO.File]::Move($file.FullName, ($file.FullName + ''.elsewhere'')); [void][IO.Directory]::CreateDirectory($target)')
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Moved=0') "Directory destination: $output"
     Write-Output "$engineName PASS directory destination exit 1 (move double)"
 
     New-Case 'dry'
-    Put-File (Join-Path $desktop 'note.txt')
-    Put-File (Join-Path $documents 'note.txt')
+    Write-TestFile (Join-Path $desktop 'note.txt')
+    Write-TestFile (Join-Path $documents 'note.txt')
     $before = @(Get-TreeSnapshot)
-    Run-Case @('-DryRun')
+    Invoke-Case @('-DryRun')
     $after = @(Get-TreeSnapshot)
     Assert ($status -eq 0) "dry exit: $output"
     Assert (-not (Compare-Object $before $after)) 'Dry run changed tree'
@@ -244,14 +248,14 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     Write-Output "$engineName PASS dry run, no created files/directories, cross-source conflict"
 
     New-Case 'age'
-    Put-File (Join-Path $desktop 'creation.txt')
+    Write-TestFile (Join-Path $desktop 'creation.txt')
     [IO.File]::SetCreationTimeUtc((Join-Path $desktop 'creation.txt'),[DateTime]::UtcNow)
-    Put-File (Join-Path $desktop 'modified.txt')
+    Write-TestFile (Join-Path $desktop 'modified.txt')
     [IO.File]::SetLastWriteTimeUtc((Join-Path $desktop 'modified.txt'),[DateTime]::UtcNow)
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 0 -and ($output -join "`n") -match 'Skipped=2') "age: $output"
     Assert (-not (Test-Path (Join-Path $vault '00_Inbox'))) 'Premature inbox'
-    Run-Case @('-MinAgeMinutes','0')
+    Invoke-Case @('-MinAgeMinutes','0')
     Assert ($status -eq 0 -and ($output -join "`n") -match 'Moved=2') "age disabled: $output"
     Assert (@(Get-ChildItem $env:LOCALAPPDATA -Recurse -Filter 'obsidian-*.log').Count -eq 2) 'Separate logs'
     Write-Output "$engineName PASS creation/write age, age disabled, deferred inbox, separate logs"
@@ -259,20 +263,20 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
     New-Case 'import'
     $inbox = Join-Path $vault '00_Inbox'
     [void][IO.Directory]::CreateDirectory($inbox)
-    Put-File (Join-Path $inbox 'note.md')
-    Put-File (Join-Path $inbox 'note - import 20260915-120658-1.md')
+    Write-TestFile (Join-Path $inbox 'note.md')
+    Write-TestFile (Join-Path $inbox 'note - import 20260915-120658-1.md')
     $code = $code.Replace("`$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'", "`$stamp = '20260915-120658'")
     Write-TestCopy
-    Put-File (Join-Path $desktop 'note.txt')
-    Put-File (Join-Path $documents 'note.txt')
+    Write-TestFile (Join-Path $desktop 'note.txt')
+    Write-TestFile (Join-Path $documents 'note.txt')
     [void][IO.Directory]::CreateDirectory((Join-Path $desktop 'sub'))
-    Put-File (Join-Path $desktop 'sub\nested.txt')
-    Put-File (Join-Path $desktop 'keep.csv')
+    Write-TestFile (Join-Path $desktop 'sub\nested.txt')
+    Write-TestFile (Join-Path $desktop 'keep.csv')
     $hash = (Get-FileHash (Join-Path $desktop 'note.txt')).Hash
     $existingTime = [IO.File]::GetLastWriteTimeUtc((Join-Path $inbox 'note.md'))
-    Run-Case @('-DryRun')
+    Invoke-Case @('-DryRun')
     Assert ($status -eq 0 -and ($output -join "`n") -match '120658-2.md' -and ($output -join "`n") -match '120658-3.md') 'Dry existing candidates'
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 0) "import: $output"
     foreach ($n in @(2,3)) {
         Assert ((Get-FileHash (Join-Path $inbox "note - import 20260915-120658-$n.md")).Hash -eq $hash) 'Bytes changed'
@@ -284,38 +288,38 @@ foreach ($engine in @((Join-Path $PSHOME $runtime))) {
 
     New-Case 'missing'
     $vault = Join-Path $case 'DoesNotExist'
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and -not (Test-Path $vault)) 'Missing vault not rejected'
     Write-Output "$engineName PASS missing vault exit 1, root not created"
 
     New-Case 'empty'
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 0 -and -not (Test-Path (Join-Path $vault '00_Inbox')) ) 'Empty run'
     Write-Output "$engineName PASS empty run exit 0 without inbox"
 
     New-Case 'file-error'
-    Put-File (Join-Path $desktop 'a-locked.txt')
-    Put-File (Join-Path $desktop 'z-good.txt')
+    Write-TestFile (Join-Path $desktop 'a-locked.txt')
+    Write-TestFile (Join-Path $desktop 'z-good.txt')
     $lock = [IO.File]::Open((Join-Path $desktop 'a-locked.txt'), 'Open', 'Read', 'None')
-    try { Run-Case } finally { $lock.Dispose() }
+    try { Invoke-Case } finally { $lock.Dispose() }
     Assert ($status -eq 1 -and (Test-Path (Join-Path $vault '00_Inbox\z-good.md')) -and (Test-Path (Join-Path $desktop 'a-locked.txt'))) "Per-file error: $output"
     Write-Output "$engineName PASS failed move continues, source retained, exit 1"
 
     New-Case 'log-init-error'
     [IO.File]::WriteAllText($env:LOCALAPPDATA,'block directory')
-    Put-File (Join-Path $desktop 'a.txt')
-    Put-File (Join-Path $desktop 'b.txt')
-    Run-Case
+    Write-TestFile (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'b.txt')
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Moved=2') "Log initialization error: $output"
     Assert (@($output | Where-Object { "$_" -match 'Log initialization failed' }).Count -eq 1) 'Repeated log initialization error'
     Write-Output "$engineName PASS log initialization failure continues once, exit 1"
 
     New-Case 'log-write-error'
-    Put-File (Join-Path $desktop 'a.txt')
-    Put-File (Join-Path $desktop 'b.txt')
+    Write-TestFile (Join-Path $desktop 'a.txt')
+    Write-TestFile (Join-Path $desktop 'b.txt')
     $code = $code.Replace('$script:logEnabled = $true', '$script:logEnabled = $true' + "`n" + '        $heldLog = [IO.File]::Open($script:logPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)')
     Write-TestCopy
-    Run-Case
+    Invoke-Case
     Assert ($status -eq 1 -and ($output -join "`n") -match 'Moved=2') "Log write error: $output"
     Assert (@($output | Where-Object { "$_" -match 'Log write failed' }).Count -eq 1) 'Repeated log write error'
     Write-Output "$engineName PASS log write failure disables logging, continues, exit 1"
