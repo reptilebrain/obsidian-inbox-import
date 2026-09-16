@@ -121,7 +121,7 @@ idea - import 20260915-120658-2.md
 
 Every candidate is checked. The move operation also refuses to overwrite a destination created by another process after that check. This is filename conflict handling, not content-based duplicate detection.
 
-Before reporting a successful import, the script checks that the destination is a file and the source is absent. It reports an incomplete move as an error without automatically deleting a remaining source. If the vault disappears during processing, remaining imports are aborted.
+Before reporting a successful import, the script checks that the destination is a file and the source is absent. It reports an incomplete move as an error without automatically deleting a remaining source. Before creating the inbox for a real move, the script checks the vault root again and aborts remaining imports if that check finds it missing or no longer a filesystem directory. The vault can still change between the check and the operation; this does not eliminate concurrency races.
 
 ## Task Scheduler
 
@@ -214,7 +214,9 @@ Coverage includes configuration precedence, empty and relative paths, dry runs, 
 
 The separate PSScriptAnalyzer workflow checks tracked PowerShell files in both Windows PowerShell 5.1 and PowerShell 7. It uses PSScriptAnalyzer 1.25.0 and fails on errors or warnings. The ignored local configuration is excluded.
 
-To run it locally after installing the pinned analyzer:
+Local analysis requires Git on `PATH` and a Git checkout of this repository: `tests/run-analysis.ps1` uses `git ls-files` to select tracked files. An extracted repository ZIP alone is not enough for this analysis command. Normal imports and the integration test suite do not require Git.
+
+From the repository root, install the pinned analyzer and run:
 
 ```powershell
 Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser
