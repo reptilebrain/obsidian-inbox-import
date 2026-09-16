@@ -3,6 +3,8 @@
 [![Tests](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/tests.yml)
 [![PSScriptAnalyzer](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/analysis.yml/badge.svg?branch=main)](https://github.com/reptilebrain/obsidian-inbox-import/actions/workflows/analysis.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![PowerShell: 5.1 & 7](https://img.shields.io/badge/PowerShell-5.1%20%26%207-blue.svg)](#requirements)
+[![Dependencies: none](https://img.shields.io/badge/Dependencies-none-brightgreen.svg)](#requirements)
 
 Move loose `.txt` files from your Windows Desktop and Documents folders into an existing Obsidian vault's `00_Inbox`, changing the extension to `.md` without rewriting the file contents.
 
